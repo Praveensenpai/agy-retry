@@ -349,19 +349,10 @@ fn main() {
     let patterns = build_patterns();
 
     // ── state ──
-    let mut stream_buffer = String::new();
     let mut error_detected_this_turn = false;
     let mut last_error = String::new();
     let mut pending_retry = false;
     let mut pending_retry_at = Instant::now();
-    // After firing a retry, ignore patterns for this long to avoid re-triggering
-    // on agy's own response which may echo back error context.
-    // 2s is enough to skip the echo, but short enough to catch a real re-error.
-    let retry_cooldown = Duration::from_secs(2);
-    let mut cooldown_until: Option<Instant> = None;
-    // On startup, agy replays conversation history which may contain old error
-    // strings. Ignore patterns for the first 5 seconds after launch.
-    let startup_grace_until = Instant::now() + Duration::from_secs(5);
 
     // ── event loop ──
     'main: loop {
@@ -377,9 +368,9 @@ fn main() {
             write_all_fd(master_fd, b".");
             std::thread::sleep(Duration::from_millis(50));
             write_all_fd(master_fd, b"\r");
-            stream_buffer.clear();
-            error_detected_this_turn = false;
-            cooldown_until = Some(Instant::now() + retry_cooldown);
+            // Keep error_detected_this_turn = true so we don't re-trigger on
+            // agy's response which may echo the old error text.
+            // It resets only when the user presses Enter.
         }
 
         // Compute select timeout
@@ -413,25 +404,14 @@ fn main() {
                     // Forward to user's terminal
                     write_all_fd(STDOUT_FILENO, &data);
 
+                    // Only check the fresh chunk — not an accumulated buffer.
+                    // This prevents re-triggering on old error text that agy
+                    // may echo back in its response after a retry.
                     let text = String::from_utf8_lossy(&data);
                     let plain = strip_ansi(&text);
-                    stream_buffer.push_str(&plain);
 
-                    // Bound buffer — snap to char boundary to avoid panics on
-                    // multi-byte UTF-8 sequences.
-                    if stream_buffer.len() > 8192 {
-                        let trim = stream_buffer.len() - 4096;
-                        // Walk forward until we land on a char boundary.
-                        let trim = (trim..=stream_buffer.len())
-                            .find(|&i| stream_buffer.is_char_boundary(i))
-                            .unwrap_or(stream_buffer.len());
-                        stream_buffer.drain(..trim);
-                    }
-
-                    let in_cooldown = cooldown_until.map_or(false, |t| Instant::now() < t);
-                    let in_startup_grace = Instant::now() < startup_grace_until;
-                    if !error_detected_this_turn && !pending_retry && !in_cooldown && !in_startup_grace {
-                        if let Some(matched) = check_patterns(&stream_buffer, &patterns) {
+                    if !error_detected_this_turn && !pending_retry {
+                        if let Some(matched) = check_patterns(&plain, &patterns) {
                             last_error = matched;
                             error_detected_this_turn = true;
                             pending_retry = true;
@@ -449,7 +429,6 @@ fn main() {
                 Some(user_data) => {
                     // User interaction: reset state
                     if user_data.contains(&b'\r') || user_data.contains(&b'\n') {
-                        stream_buffer.clear();
                         error_detected_this_turn = false;
                         pending_retry = false;
                     }
