@@ -4,10 +4,8 @@
 //! the session by sending '.' + Enter.  Also supports `-c`/`--conversation`
 //! flags that are forwarded to `agy`.
 //!
-//! Config env-vars:
-//!   AGY_BIN                 – path to the agy binary  (default: ~/.local/bin/agy)
-//!   AGY_AUTO_RETRY_DELAY    – seconds before retry     (default: 1.0)
-//!   AGY_AUTO_EXTRA_PATTERNS – pipe-separated extra error patterns
+//! Configuration file:
+//!   ~/.config/agy-retry/config.toml
 
 use std::env;
 use std::ffi::CString;
@@ -62,13 +60,6 @@ fn load_config() -> Config {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-fn env_f64(key: &str, default: f64) -> f64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-
 /// Write bytes to a raw fd, ignoring EINTR.
 fn write_all_fd(fd: RawFd, buf: &[u8]) {
     let mut written = 0;
@@ -116,18 +107,6 @@ fn build_patterns(config: &Config) -> Vec<Regex> {
     if let Some(extra) = &config.extra_patterns {
         for p in extra {
             let p = p.trim();
-            if !p.is_empty() {
-                if let Ok(re) = Regex::new(&format!("(?i){}", regex::escape(p))) {
-                    pats.push(re);
-                }
-            }
-        }
-    }
-
-    // From env var AGY_AUTO_EXTRA_PATTERNS
-    if let Ok(extra) = env::var("AGY_AUTO_EXTRA_PATTERNS") {
-        for part in extra.split('|') {
-            let p = part.trim();
             if !p.is_empty() {
                 if let Ok(re) = Regex::new(&format!("(?i){}", regex::escape(p))) {
                     pats.push(re);
@@ -299,18 +278,14 @@ fn do_select(fds: &[RawFd], timeout_ms: u64) -> Vec<RawFd> {
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
-    // Config
+    // Config from ~/.config/agy-retry/config.toml
     let config = load_config();
 
     let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let default_bin = format!("{}/.local/bin/agy", home);
-    let agy_bin = env::var("AGY_BIN")
-        .ok()
-        .or(config.agy_bin.clone())
-        .unwrap_or(default_bin);
+    let agy_bin = config.agy_bin.clone().unwrap_or(default_bin);
 
-    let retry_delay_secs = env_f64("AGY_AUTO_RETRY_DELAY", config.retry_delay.unwrap_or(1.0));
-    let retry_delay = Duration::from_secs_f64(retry_delay_secs);
+    let retry_delay = Duration::from_secs_f64(config.retry_delay.unwrap_or(1.0));
 
     if !std::path::Path::new(&agy_bin).exists() {
         eprintln!("[agy-retry] Error: agy binary not found at {}", agy_bin);

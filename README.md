@@ -102,15 +102,13 @@ All other arguments and flags are forwarded to `agy` as-is.
 
 ## Configuration
 
-Configure `agy-retry` via `~/.config/agy-retry/config.toml` (recommended) or environment variables.
-
-### Config File (`~/.config/agy-retry/config.toml`)
+Configure `agy-retry` via `~/.config/agy-retry/config.toml`:
 
 ```toml
 # Delay in seconds before sending '.' (default: 1.0)
 retry_delay = 1.0
 
-# Path to agy binary (optional)
+# Path to agy binary (default: ~/.local/bin/agy)
 # agy_bin = "~/.local/bin/agy"
 
 # Extra error patterns to detect and auto-retry
@@ -120,20 +118,10 @@ extra_patterns = [
 ]
 ```
 
-### Environment Variables
+Default built-in patterns:
+- `There was a network issue connecting to the server`
+- `Agent execution terminated due to error`
 
-Environment variables take precedence over the config file:
-
-| Variable | Config Key | Default | Description |
-|---|---|---|---|
-| `AGY_BIN` | `agy_bin` | `~/.local/bin/agy` | Path to your `agy` binary |
-| `AGY_AUTO_RETRY_DELAY` | `retry_delay` | `1.0` | Seconds to wait before retrying |
-| `AGY_AUTO_EXTRA_PATTERNS` | `extra_patterns` | _(empty)_ | Extra error strings to watch for (pipe-separated) |
-
-```bash
-# Ad-hoc override: wait 2s before retrying
-AGY_AUTO_RETRY_DELAY=2.0 agy-retry -c
-```
 
 ---
 
