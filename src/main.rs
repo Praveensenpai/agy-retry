@@ -11,8 +11,8 @@
 
 use std::env;
 use std::ffi::CString;
-
 use std::os::unix::io::RawFd;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use libc::{
@@ -22,12 +22,46 @@ use libc::{
     FD_ISSET, FD_SET, FD_ZERO,
 };
 use regex::Regex;
+use serde::Deserialize;
+
+// ─── config ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Default)]
+struct Config {
+    agy_bin: Option<String>,
+    retry_delay: Option<f64>,
+    extra_patterns: Option<Vec<String>>,
+}
+
+fn config_file_path() -> Option<PathBuf> {
+    if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
+        Some(PathBuf::from(xdg).join("agy-retry/config.toml"))
+    } else if let Ok(home) = env::var("HOME") {
+        Some(PathBuf::from(home).join(".config/agy-retry/config.toml"))
+    } else {
+        None
+    }
+}
+
+fn load_config() -> Config {
+    let path = match config_file_path() {
+        Some(p) => p,
+        None => return Config::default(),
+    };
+
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            match toml::from_str::<Config>(&content) {
+                Ok(cfg) => return cfg,
+                Err(err) => eprintln!("[agy-retry] Warning: failed to parse config at {}: {}", path.display(), err),
+            }
+        }
+    }
+    Config::default()
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-fn env_str(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
-}
 fn env_f64(key: &str, default: f64) -> f64 {
     env::var(key)
         .ok()
@@ -72,11 +106,25 @@ fn strip_ansi(s: &str) -> String {
 }
 
 /// Build the list of error-detection regexes.
-fn build_patterns() -> Vec<Regex> {
+fn build_patterns(config: &Config) -> Vec<Regex> {
     let mut pats: Vec<Regex> = vec![
         Regex::new(r"(?i)There was a network issue connecting to the server").unwrap(),
         Regex::new(r"(?i)Agent execution terminated due to error").unwrap(),
     ];
+
+    // From config file
+    if let Some(extra) = &config.extra_patterns {
+        for p in extra {
+            let p = p.trim();
+            if !p.is_empty() {
+                if let Ok(re) = Regex::new(&format!("(?i){}", regex::escape(p))) {
+                    pats.push(re);
+                }
+            }
+        }
+    }
+
+    // From env var AGY_AUTO_EXTRA_PATTERNS
     if let Ok(extra) = env::var("AGY_AUTO_EXTRA_PATTERNS") {
         for part in extra.split('|') {
             let p = part.trim();
@@ -102,36 +150,38 @@ fn check_patterns(text: &str, patterns: &[Regex]) -> Option<String> {
 // ─── arg parsing ──────────────────────────────────────────────────────────────
 
 /// Parse our own args, returning (agy_args_to_forward).
-/// We normalise:
-///   -c ID  | --conversation ID  | -c=ID | --conversation=ID
-/// into:  ["--conversation", ID]  which agy understands.
+/// In agy:
+///   -c, --continue        Continue the most recent conversation (no argument)
+///   --conversation <ID>   Resume a specific conversation by ID
+/// We forward -c / --continue as-is, and also support:
+///   -c <ID> or -c=<ID>  -->  ["--conversation", <ID>]
 fn parse_args(args: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
-        // short form: -c VALUE  or  -cVALUE
         if a == "-c" {
-            i += 1;
-            if i < args.len() {
+            // Check if followed by a conversation ID (not another option)
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                i += 1;
                 out.push("--conversation".to_string());
                 out.push(args[i].clone());
             } else {
-                eprintln!("[agy-retry] -c requires an argument");
+                // Standalone -c: continue most recent conversation
+                out.push("-c".to_string());
             }
+        } else if a.starts_with("-c=") {
+            out.push("--conversation".to_string());
+            out.push(a["-c=".len()..].to_string());
         } else if a.starts_with("-c") && a.len() > 2 && !a.starts_with("--") {
-            // -cSOMETHING
+            // e.g. -c<ID>
             out.push("--conversation".to_string());
             out.push(a[2..].to_string());
-        }
-        // long form: --conversation VALUE  or  --conversation=VALUE
-        else if a == "--conversation" || a == "-conversation" {
-            i += 1;
-            if i < args.len() {
-                out.push("--conversation".to_string());
+        } else if a == "--conversation" || a == "-conversation" {
+            out.push("--conversation".to_string());
+            if i + 1 < args.len() {
+                i += 1;
                 out.push(args[i].clone());
-            } else {
-                eprintln!("[agy-retry] --conversation requires an argument");
             }
         } else if a.starts_with("--conversation=") {
             out.push("--conversation".to_string());
@@ -250,9 +300,17 @@ fn do_select(fds: &[RawFd], timeout_ms: u64) -> Vec<RawFd> {
 
 fn main() {
     // Config
+    let config = load_config();
+
     let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    let agy_bin = env_str("AGY_BIN", &format!("{}/.local/bin/agy", home));
-    let retry_delay = Duration::from_secs_f64(env_f64("AGY_AUTO_RETRY_DELAY", 1.0));
+    let default_bin = format!("{}/.local/bin/agy", home);
+    let agy_bin = env::var("AGY_BIN")
+        .ok()
+        .or(config.agy_bin.clone())
+        .unwrap_or(default_bin);
+
+    let retry_delay_secs = env_f64("AGY_AUTO_RETRY_DELAY", config.retry_delay.unwrap_or(1.0));
+    let retry_delay = Duration::from_secs_f64(retry_delay_secs);
 
     if !std::path::Path::new(&agy_bin).exists() {
         eprintln!("[agy-retry] Error: agy binary not found at {}", agy_bin);
@@ -302,7 +360,7 @@ fn main() {
     // Put stdin in raw mode
     let saved_termios = set_raw(STDIN_FILENO);
 
-    let patterns = build_patterns();
+    let patterns = build_patterns(&config);
 
     // ── state ──
     let mut stream_buffer = String::new();
@@ -418,3 +476,52 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_args_standalone_continue() {
+        let args = vec!["-c".to_string()];
+        assert_eq!(parse_args(&args), vec!["-c"]);
+
+        let args2 = vec!["--continue".to_string()];
+        assert_eq!(parse_args(&args2), vec!["--continue"]);
+    }
+
+    #[test]
+    fn test_parse_args_conversation_id() {
+        let args = vec!["-c".to_string(), "conv-123".to_string()];
+        assert_eq!(parse_args(&args), vec!["--conversation", "conv-123"]);
+
+        let args2 = vec!["-c=conv-456".to_string()];
+        assert_eq!(parse_args(&args2), vec!["--conversation", "conv-456"]);
+
+        let args3 = vec!["-cconv-789".to_string()];
+        assert_eq!(parse_args(&args3), vec!["--conversation", "conv-789"]);
+
+        let args4 = vec!["--conversation".to_string(), "conv-abc".to_string()];
+        assert_eq!(parse_args(&args4), vec!["--conversation", "conv-abc"]);
+    }
+
+    #[test]
+    fn test_parse_args_continue_with_other_flags() {
+        let args = vec!["-c".to_string(), "--model".to_string(), "claude".to_string()];
+        assert_eq!(parse_args(&args), vec!["-c", "--model", "claude"]);
+    }
+
+    #[test]
+    fn test_build_patterns_with_config() {
+        let config = Config {
+            agy_bin: None,
+            retry_delay: None,
+            extra_patterns: Some(vec!["rate limit exceeded".to_string()]),
+        };
+        let pats = build_patterns(&config);
+        assert!(check_patterns("Error: rate limit exceeded on request", &pats).is_some());
+        assert!(check_patterns("There was a network issue connecting to the server", &pats).is_some());
+        assert!(check_patterns("All clear, no error here", &pats).is_none());
+    }
+}
+

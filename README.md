@@ -88,30 +88,51 @@ cp target/release/agy-retry ~/.local/bin/
 # start a new session
 agy-retry
 
-# resume a specific conversation
+# continue the most recent conversation (just like agy -c)
+agy-retry -c
+
+# resume a specific conversation by ID
 agy-retry -c <conversation-id>
+agy-retry --conversation <conversation-id>
 ```
 
-All arguments are forwarded to `agy` as-is.
+All other arguments and flags are forwarded to `agy` as-is.
 
 ---
 
 ## Configuration
 
-Tune the behavior with environment variables — no config file needed.
+Configure `agy-retry` via `~/.config/agy-retry/config.toml` (recommended) or environment variables.
 
-| Variable | Default | Description |
-|---|---|---|
-| `AGY_BIN` | `~/.local/bin/agy` | Path to your `agy` binary |
-| `AGY_AUTO_RETRY_DELAY` | `1.0` | Seconds to wait before retrying |
-| `AGY_AUTO_EXTRA_PATTERNS` | _(empty)_ | Extra error strings to watch for, pipe-separated |
+### Config File (`~/.config/agy-retry/config.toml`)
+
+```toml
+# Delay in seconds before sending '.' (default: 1.0)
+retry_delay = 1.0
+
+# Path to agy binary (optional)
+# agy_bin = "~/.local/bin/agy"
+
+# Extra error patterns to detect and auto-retry
+extra_patterns = [
+    "rate limit exceeded",
+    "quota reached",
+]
+```
+
+### Environment Variables
+
+Environment variables take precedence over the config file:
+
+| Variable | Config Key | Default | Description |
+|---|---|---|---|
+| `AGY_BIN` | `agy_bin` | `~/.local/bin/agy` | Path to your `agy` binary |
+| `AGY_AUTO_RETRY_DELAY` | `retry_delay` | `1.0` | Seconds to wait before retrying |
+| `AGY_AUTO_EXTRA_PATTERNS` | `extra_patterns` | _(empty)_ | Extra error strings to watch for (pipe-separated) |
 
 ```bash
-# wait 2s before retrying
-AGY_AUTO_RETRY_DELAY=2.0 agy-retry
-
-# watch for additional error messages
-AGY_AUTO_EXTRA_PATTERNS="rate limit exceeded|quota reached" agy-retry
+# Ad-hoc override: wait 2s before retrying
+AGY_AUTO_RETRY_DELAY=2.0 agy-retry -c
 ```
 
 ---
