@@ -121,6 +121,32 @@ elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
     sudo ln -sf "$INSTALL_DIR/$BINARY" "/usr/local/bin/$BINARY" 2>/dev/null || true
 fi
 
+# Optional: Prompt to alias agy=agy-retry
+add_alias_to_rc() {
+    local rc_file="$1"
+    if [ -f "$rc_file" ] && ! grep -q 'alias agy=' "$rc_file"; then
+        printf '\n# Alias agy to agy-retry for automatic recovery\nalias agy="agy-retry"\n' >> "$rc_file"
+    fi
+}
+
+echo ""
+ALIAS_CHOICE=""
+if [ -c /dev/tty ]; then
+    read -r -p "Do you want to alias agy=agy-retry in your shell profile? [y/N] " ALIAS_CHOICE < /dev/tty || true
+elif [ -t 0 ]; then
+    read -r -p "Do you want to alias agy=agy-retry in your shell profile? [y/N] " ALIAS_CHOICE || true
+fi
+
+case "$ALIAS_CHOICE" in
+    [yY]|[yY][eE][sS])
+        add_alias_to_rc "$HOME/.bashrc"
+        add_alias_to_rc "$HOME/.zshrc"
+        echo "✔ Added alias: agy=\"agy-retry\""
+        ;;
+    *)
+        ;;
+esac
+
 echo ""
 echo "🎉 Installation complete!"
-echo "Run '${BINARY}' or '${BINARY} -c <conversation-id>' to start."
+echo "Run '${BINARY}' or '${BINARY} -c' to start."
