@@ -356,7 +356,8 @@ fn main() {
     let mut pending_retry_at = Instant::now();
     // After firing a retry, ignore patterns for this long to avoid re-triggering
     // on agy's own response which may echo back error context.
-    let retry_cooldown = Duration::from_secs(10);
+    // 2s is enough to skip the echo, but short enough to catch a real re-error.
+    let retry_cooldown = Duration::from_secs(2);
     let mut cooldown_until: Option<Instant> = None;
 
     // ── event loop ──
