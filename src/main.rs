@@ -1,14 +1,13 @@
-//! agy-retry: Transparent terminal wrapper for `agy` with error auto-retry.
+//! agy-retry: Terminal wrapper for `agy` with error auto-retry.
 //!
 //! Monitors live PTY output for failure messages and automatically resumes
 //! the session by sending '.' + Enter.  Also supports `-c`/`--conversation`
 //! flags that are forwarded to `agy`.
 //!
 //! Config env-vars:
-//!   AGY_BIN                – path to the agy binary  (default: ~/.local/bin/agy)
-//!   AGY_AUTO_MAX_RETRIES   – max consecutive retries  (default: 3)
-//!   AGY_AUTO_RETRY_DELAY   – seconds before retry     (default: 1.0)
-//!   AGY_AUTO_COOLDOWN      – seconds to ignore redraws after retry (default: 4.0)
+//!   AGY_BIN                 – path to the agy binary  (default: ~/.local/bin/agy)
+//!   AGY_AUTO_RETRY_DELAY    – seconds before retry     (default: 1.0)
+//!   AGY_AUTO_COOLDOWN       – seconds to ignore redraws after retry (default: 4.0)
 //!   AGY_AUTO_EXTRA_PATTERNS – pipe-separated extra error patterns
 
 use std::env;
@@ -31,12 +30,6 @@ fn env_str(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
 }
 fn env_f64(key: &str, default: f64) -> f64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-fn env_usize(key: &str, default: usize) -> usize {
     env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())
@@ -260,7 +253,6 @@ fn main() {
     // Config
     let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let agy_bin = env_str("AGY_BIN", &format!("{}/.local/bin/agy", home));
-    let max_retries = env_usize("AGY_AUTO_MAX_RETRIES", 3);
     let retry_delay = Duration::from_secs_f64(env_f64("AGY_AUTO_RETRY_DELAY", 1.0));
     let cooldown_dur = Duration::from_secs_f64(env_f64("AGY_AUTO_COOLDOWN", 4.0));
 
@@ -321,9 +313,6 @@ fn main() {
     let mut pending_retry = false;
     let mut pending_retry_at = Instant::now();
     let mut cooldown_until: Option<Instant> = None;
-    let mut consecutive_retries: usize = 0;
-    let mut successful_bytes_since_retry: usize = 0;
-    let mut turn_start = Instant::now();
 
     // ── event loop ──
     'main: loop {
@@ -332,31 +321,16 @@ fn main() {
         // Fire pending retry if timer elapsed
         if pending_retry && now >= pending_retry_at {
             pending_retry = false;
-            if consecutive_retries < max_retries {
-                consecutive_retries += 1;
-                let msg = format!(
-                    "\r\n\x1b[1;33m[agy-retry]\x1b[0m Error detected ({last_error}). \
-                     Resuming with '.' (attempt {consecutive_retries}/{max_retries})...\r\n"
-                );
-                write_all_fd(STDOUT_FILENO, msg.as_bytes());
-                // Send ".\r" to agy
-                write_all_fd(master_fd, b".");
-                std::thread::sleep(Duration::from_millis(50));
-                write_all_fd(master_fd, b"\r");
-                cooldown_until = Some(Instant::now() + cooldown_dur);
-                stream_buffer.clear();
-                error_detected_this_turn = false;
-                successful_bytes_since_retry = 0;
-                turn_start = Instant::now();
-            } else {
-                let msg = format!(
-                    "\r\n\x1b[1;31m[agy-retry]\x1b[0m Error repeated {max_retries} \
-                     consecutive times. Pausing auto-retry so you can inspect.\r\n"
-                );
-                write_all_fd(STDOUT_FILENO, msg.as_bytes());
-                stream_buffer.clear();
-                error_detected_this_turn = true;
-            }
+            let msg = format!(
+                "\r\n\x1b[1;33m[agy-retry]\x1b[0m Error detected ({last_error}). Resuming...\r\n"
+            );
+            write_all_fd(STDOUT_FILENO, msg.as_bytes());
+            write_all_fd(master_fd, b".");
+            std::thread::sleep(Duration::from_millis(50));
+            write_all_fd(master_fd, b"\r");
+            cooldown_until = Some(Instant::now() + cooldown_dur);
+            stream_buffer.clear();
+            error_detected_this_turn = false;
         }
 
         // Compute select timeout
@@ -417,14 +391,6 @@ fn main() {
                                 pending_retry = true;
                                 pending_retry_at = Instant::now() + retry_delay;
                             }
-                        } else if !error_detected_this_turn {
-                            // Successful streaming after retry
-                            successful_bytes_since_retry += plain.len();
-                            if successful_bytes_since_retry > 200
-                                && turn_start.elapsed() > Duration::from_secs(4)
-                            {
-                                consecutive_retries = 0;
-                            }
                         }
                     }
                 }
@@ -436,14 +402,11 @@ fn main() {
             match read_fd(STDIN_FILENO, 1024) {
                 None => break 'main,
                 Some(user_data) => {
-                    // User interaction: reset counters
+                    // User interaction: reset state
                     if user_data.contains(&b'\r') || user_data.contains(&b'\n') {
-                        consecutive_retries = 0;
                         stream_buffer.clear();
                         error_detected_this_turn = false;
                         pending_retry = false;
-                        successful_bytes_since_retry = 0;
-                        turn_start = Instant::now();
                     }
                     write_all_fd(master_fd, &user_data);
                 }
