@@ -28,7 +28,6 @@ use serde::Deserialize;
 struct Config {
     agy_bin: Option<String>,
     retry_delay: Option<f64>,
-    extra_patterns: Option<Vec<String>>,
 }
 
 fn config_file_path() -> Option<PathBuf> {
@@ -97,24 +96,11 @@ fn strip_ansi(s: &str) -> String {
 }
 
 /// Build the list of error-detection regexes.
-fn build_patterns(config: &Config) -> Vec<Regex> {
-    let mut pats: Vec<Regex> = vec![
+fn build_patterns() -> Vec<Regex> {
+    vec![
         Regex::new(r"(?i)There was a network issue connecting to the server").unwrap(),
         Regex::new(r"(?i)Agent execution terminated due to error").unwrap(),
-    ];
-
-    // From config file
-    if let Some(extra) = &config.extra_patterns {
-        for p in extra {
-            let p = p.trim();
-            if !p.is_empty() {
-                if let Ok(re) = Regex::new(&format!("(?i){}", regex::escape(p))) {
-                    pats.push(re);
-                }
-            }
-        }
-    }
-    pats
+    ]
 }
 
 fn check_patterns(text: &str, patterns: &[Regex]) -> Option<String> {
@@ -335,7 +321,7 @@ fn main() {
     // Put stdin in raw mode
     let saved_termios = set_raw(STDIN_FILENO);
 
-    let patterns = build_patterns(&config);
+    let patterns = build_patterns();
 
     // ── state ──
     let mut stream_buffer = String::new();
@@ -487,15 +473,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_patterns_with_config() {
-        let config = Config {
-            agy_bin: None,
-            retry_delay: None,
-            extra_patterns: Some(vec!["rate limit exceeded".to_string()]),
-        };
-        let pats = build_patterns(&config);
-        assert!(check_patterns("Error: rate limit exceeded on request", &pats).is_some());
+    fn test_build_patterns() {
+        let pats = build_patterns();
         assert!(check_patterns("There was a network issue connecting to the server", &pats).is_some());
+        assert!(check_patterns("Agent execution terminated due to error", &pats).is_some());
         assert!(check_patterns("All clear, no error here", &pats).is_none());
     }
 }
