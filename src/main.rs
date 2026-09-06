@@ -171,7 +171,7 @@ extern "C" fn sigwinch_handler(_: c_int) {
 fn pty_fork_exec(prog: &str, argv: &[String]) -> (libc::pid_t, RawFd) {
     let mut master: RawFd = -1;
     let child = unsafe {
-        let slave_name_buf = [0i8; 256];
+        let slave_name_buf = [0 as libc::c_char; 256];
         // openpty
         let mut slave: RawFd = -1;
         let rc = libc::openpty(
@@ -198,7 +198,7 @@ fn pty_fork_exec(prog: &str, argv: &[String]) -> (libc::pid_t, RawFd) {
 
             // build C argv
             let prog_c = CString::new(prog).unwrap();
-            let mut cargv: Vec<*const i8> = Vec::new();
+            let mut cargv: Vec<*const libc::c_char> = Vec::new();
             let prog_ptr = prog_c.as_ptr();
             cargv.push(prog_ptr);
             let cstrings: Vec<CString> = argv.iter()
@@ -276,7 +276,7 @@ fn main() {
     // If stdin is not a tty, exec agy directly (no wrapping needed)
     if unsafe { libc::isatty(STDIN_FILENO) } == 0 {
         let prog = CString::new(agy_bin.as_str()).unwrap();
-        let mut cargv: Vec<*const i8> = Vec::new();
+        let mut cargv: Vec<*const libc::c_char> = Vec::new();
         cargv.push(prog.as_ptr());
         let cstrings: Vec<CString> = agy_args.iter()
             .map(|a| CString::new(a.as_str()).unwrap())
