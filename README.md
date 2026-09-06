@@ -104,7 +104,6 @@ Tune the behavior with environment variables — no config file needed.
 |---|---|---|
 | `AGY_BIN` | `~/.local/bin/agy` | Path to your `agy` binary |
 | `AGY_AUTO_RETRY_DELAY` | `1.0` | Seconds to wait before retrying |
-| `AGY_AUTO_COOLDOWN` | `4.0` | Seconds to ignore output noise after retrying |
 | `AGY_AUTO_EXTRA_PATTERNS` | _(empty)_ | Extra error strings to watch for, pipe-separated |
 
 ```bash

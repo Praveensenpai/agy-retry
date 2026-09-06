@@ -7,7 +7,6 @@
 //! Config env-vars:
 //!   AGY_BIN                 – path to the agy binary  (default: ~/.local/bin/agy)
 //!   AGY_AUTO_RETRY_DELAY    – seconds before retry     (default: 1.0)
-//!   AGY_AUTO_COOLDOWN       – seconds to ignore redraws after retry (default: 4.0)
 //!   AGY_AUTO_EXTRA_PATTERNS – pipe-separated extra error patterns
 
 use std::env;
@@ -254,7 +253,6 @@ fn main() {
     let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let agy_bin = env_str("AGY_BIN", &format!("{}/.local/bin/agy", home));
     let retry_delay = Duration::from_secs_f64(env_f64("AGY_AUTO_RETRY_DELAY", 1.0));
-    let cooldown_dur = Duration::from_secs_f64(env_f64("AGY_AUTO_COOLDOWN", 4.0));
 
     if !std::path::Path::new(&agy_bin).exists() {
         eprintln!("[agy-retry] Error: agy binary not found at {}", agy_bin);
@@ -312,7 +310,6 @@ fn main() {
     let mut last_error = String::new();
     let mut pending_retry = false;
     let mut pending_retry_at = Instant::now();
-    let mut cooldown_until: Option<Instant> = None;
 
     // ── event loop ──
     'main: loop {
@@ -328,7 +325,6 @@ fn main() {
             write_all_fd(master_fd, b".");
             std::thread::sleep(Duration::from_millis(50));
             write_all_fd(master_fd, b"\r");
-            cooldown_until = Some(Instant::now() + cooldown_dur);
             stream_buffer.clear();
             error_detected_this_turn = false;
         }
@@ -364,33 +360,27 @@ fn main() {
                     // Forward to user's terminal
                     write_all_fd(STDOUT_FILENO, &data);
 
-                    let now = Instant::now();
-                    // During cooldown: skip error scanning to prevent redraw re-triggers
-                    if cooldown_until.map_or(false, |t| now < t) {
-                        stream_buffer.clear();
-                    } else {
-                        let text = String::from_utf8_lossy(&data);
-                        let plain = strip_ansi(&text);
-                        stream_buffer.push_str(&plain);
+                    let text = String::from_utf8_lossy(&data);
+                    let plain = strip_ansi(&text);
+                    stream_buffer.push_str(&plain);
 
-                        // Bound buffer — snap to char boundary to avoid panics on
-                        // multi-byte UTF-8 sequences.
-                        if stream_buffer.len() > 8192 {
-                            let trim = stream_buffer.len() - 4096;
-                            // Walk forward until we land on a char boundary.
-                            let trim = (trim..=stream_buffer.len())
-                                .find(|&i| stream_buffer.is_char_boundary(i))
-                                .unwrap_or(stream_buffer.len());
-                            stream_buffer.drain(..trim);
-                        }
+                    // Bound buffer — snap to char boundary to avoid panics on
+                    // multi-byte UTF-8 sequences.
+                    if stream_buffer.len() > 8192 {
+                        let trim = stream_buffer.len() - 4096;
+                        // Walk forward until we land on a char boundary.
+                        let trim = (trim..=stream_buffer.len())
+                            .find(|&i| stream_buffer.is_char_boundary(i))
+                            .unwrap_or(stream_buffer.len());
+                        stream_buffer.drain(..trim);
+                    }
 
-                        if !error_detected_this_turn && !pending_retry {
-                            if let Some(matched) = check_patterns(&stream_buffer, &patterns) {
-                                last_error = matched;
-                                error_detected_this_turn = true;
-                                pending_retry = true;
-                                pending_retry_at = Instant::now() + retry_delay;
-                            }
+                    if !error_detected_this_turn && !pending_retry {
+                        if let Some(matched) = check_patterns(&stream_buffer, &patterns) {
+                            last_error = matched;
+                            error_detected_this_turn = true;
+                            pending_retry = true;
+                            pending_retry_at = Instant::now() + retry_delay;
                         }
                     }
                 }
