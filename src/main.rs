@@ -359,6 +359,9 @@ fn main() {
     // 2s is enough to skip the echo, but short enough to catch a real re-error.
     let retry_cooldown = Duration::from_secs(2);
     let mut cooldown_until: Option<Instant> = None;
+    // On startup, agy replays conversation history which may contain old error
+    // strings. Ignore patterns for the first 5 seconds after launch.
+    let startup_grace_until = Instant::now() + Duration::from_secs(5);
 
     // ── event loop ──
     'main: loop {
@@ -426,7 +429,8 @@ fn main() {
                     }
 
                     let in_cooldown = cooldown_until.map_or(false, |t| Instant::now() < t);
-                    if !error_detected_this_turn && !pending_retry && !in_cooldown {
+                    let in_startup_grace = Instant::now() < startup_grace_until;
+                    if !error_detected_this_turn && !pending_retry && !in_cooldown && !in_startup_grace {
                         if let Some(matched) = check_patterns(&stream_buffer, &patterns) {
                             last_error = matched;
                             error_detected_this_turn = true;
