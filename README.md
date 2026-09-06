@@ -2,10 +2,8 @@
 
 # agy-retry
 
-**Stop babysitting your AI agent.**
+**Auto-resume agy sessions on failure.**
 
-`agy-retry` watches your `agy` session and automatically recovers from errors —
-so you can walk away and come back to a finished job.
 
 [![Release](https://img.shields.io/github/v/release/Praveensenpai/agy-retry?style=flat-square&color=orange)](https://github.com/Praveensenpai/agy-retry/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
