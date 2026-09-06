@@ -57,6 +57,29 @@ fn load_config() -> Config {
     Config::default()
 }
 
+// ─── debug logging ────────────────────────────────────────────────────────────
+
+static DEBUG_LOG: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+fn init_debug_log() {
+    DEBUG_LOG.get_or_init(|| {
+        if env::var("DEBUG_AGY_RETRY").is_ok() {
+            Some(std::path::PathBuf::from("/tmp/agy-retry-debug.log"))
+        } else {
+            None
+        }
+    });
+}
+
+fn debug_log(msg: &str) {
+    if let Some(Some(path)) = DEBUG_LOG.get() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "{msg}");
+        }
+    }
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 /// Write bytes to a raw fd, ignoring EINTR.
@@ -264,6 +287,8 @@ fn do_select(fds: &[RawFd], timeout_ms: u64) -> Vec<RawFd> {
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
+    init_debug_log();
+
     // Config from ~/.config/agy-retry/config.toml
     let config = load_config();
 
@@ -329,6 +354,10 @@ fn main() {
     let mut last_error = String::new();
     let mut pending_retry = false;
     let mut pending_retry_at = Instant::now();
+    // After firing a retry, ignore patterns for this long to avoid re-triggering
+    // on agy's own response which may echo back error context.
+    let retry_cooldown = Duration::from_secs(10);
+    let mut cooldown_until: Option<Instant> = None;
 
     // ── event loop ──
     'main: loop {
@@ -346,6 +375,7 @@ fn main() {
             write_all_fd(master_fd, b"\r");
             stream_buffer.clear();
             error_detected_this_turn = false;
+            cooldown_until = Some(Instant::now() + retry_cooldown);
         }
 
         // Compute select timeout
@@ -394,7 +424,8 @@ fn main() {
                         stream_buffer.drain(..trim);
                     }
 
-                    if !error_detected_this_turn && !pending_retry {
+                    let in_cooldown = cooldown_until.map_or(false, |t| Instant::now() < t);
+                    if !error_detected_this_turn && !pending_retry && !in_cooldown {
                         if let Some(matched) = check_patterns(&stream_buffer, &patterns) {
                             last_error = matched;
                             error_detected_this_turn = true;
