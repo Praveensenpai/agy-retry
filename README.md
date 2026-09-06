@@ -1,35 +1,34 @@
 # agy-retry
 
-A transparent terminal wrapper for [`agy`](https://github.com/google-deepmind/antigravity) that automatically detects errors and retries the session — so your agent keeps running without you babysitting it.
+Ever walked away from a long `agy` session, came back, and found it sitting dead on an error screen — having done nothing for the last 30 minutes?
 
-## How it works
+`agy-retry` fixes that. It watches your `agy` session and the moment it hits an error, it automatically picks back up and keeps going. You don't have to watch it. You don't have to restart it. It just works.
 
-`agy-retry` forks `agy` inside a PTY, monitors its output in real-time, and when it detects a failure message (e.g. network error, agent execution terminated), it automatically sends `.` + Enter to resume — just like you would manually.
+## The problem
+
+`agy` sometimes fails mid-task:
 
 ```
-┌─────────────┐        PTY        ┌──────────────┐
-│   Terminal  │ ◄────────────────► │  agy-retry   │
-└─────────────┘                    └──────┬───────┘
-                                          │ monitors output
-                                          ▼
-                                   ┌──────────────┐
-                                   │     agy      │
-                                   └──────────────┘
+There was a network issue connecting to the server.
 ```
 
-## Features
+```
+Agent execution terminated due to error.
+```
 
-- 🔁 **Auto-retry** — detects errors and resumes with `.` + Enter automatically
-- 🪟 **Transparent PTY** — fully interactive, passes through all input/output
-- 📐 **Terminal resize** — syncs `SIGWINCH` / window size to the child process
-- ⚙️ **Configurable** — tunable via environment variables
-- 🔗 **Conversation forwarding** — supports `-c` / `--conversation` flags
+When that happens, you normally have to be there, notice it, and manually type `.` to resume. If you're away, the session is dead until you get back.
+
+## The fix
+
+Run `agy-retry` instead of `agy`. That's it.
+
+It detects the failure, waits a moment, and sends the resume signal automatically — up to 3 times before giving up and letting you know.
 
 ## Installation
 
-### Download binary (recommended)
+### Download binary
 
-Grab the latest release for your platform from the [Releases](https://github.com/Praveensenpai/agy-retry/releases) page.
+Grab the latest from the [Releases](https://github.com/Praveensenpai/agy-retry/releases) page.
 
 ```bash
 # Linux x86_64
@@ -49,36 +48,28 @@ cp target/release/agy-retry ~/.local/bin/
 
 ## Usage
 
-Use `agy-retry` as a drop-in replacement for `agy`:
+Drop-in replacement for `agy`:
 
 ```bash
-# Start a new session
 agy-retry
-
-# Resume a specific conversation
 agy-retry -c <conversation-id>
-agy-retry --conversation <conversation-id>
 ```
 
 ## Configuration
 
-| Environment Variable       | Default                    | Description                                      |
-|---------------------------|----------------------------|--------------------------------------------------|
-| `AGY_BIN`                 | `~/.local/bin/agy`         | Path to the `agy` binary                         |
-| `AGY_AUTO_MAX_RETRIES`    | `3`                        | Max consecutive retries before pausing           |
-| `AGY_AUTO_RETRY_DELAY`    | `1.0`                      | Seconds to wait before sending retry             |
-| `AGY_AUTO_COOLDOWN`       | `4.0`                      | Seconds to ignore redraws after a retry          |
-| `AGY_AUTO_EXTRA_PATTERNS` | _(empty)_                  | Pipe-separated extra error patterns to detect    |
-
-### Example
+| Variable | Default | What it does |
+|---|---|---|
+| `AGY_BIN` | `~/.local/bin/agy` | Path to your `agy` binary |
+| `AGY_AUTO_MAX_RETRIES` | `3` | How many times to retry before stopping |
+| `AGY_AUTO_RETRY_DELAY` | `1.0` | Seconds to wait before retrying |
+| `AGY_AUTO_COOLDOWN` | `4.0` | Seconds to ignore output noise after a retry |
+| `AGY_AUTO_EXTRA_PATTERNS` | _(empty)_ | Extra error strings to watch for, pipe-separated |
 
 ```bash
+# Retry up to 5 times, wait 2s between each
 AGY_AUTO_MAX_RETRIES=5 AGY_AUTO_RETRY_DELAY=2.0 agy-retry -c my-session
-```
 
-### Custom error patterns
-
-```bash
+# Watch for additional error messages
 AGY_AUTO_EXTRA_PATTERNS="rate limit exceeded|quota reached" agy-retry
 ```
 
