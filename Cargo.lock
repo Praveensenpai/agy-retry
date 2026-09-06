@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "agy-auto"
+name = "agy-retry"
 version = "0.1.0"
 dependencies = [
  "libc",

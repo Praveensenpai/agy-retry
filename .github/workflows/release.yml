@@ -45,8 +45,9 @@ jobs:
 
       - name: Compress binary
         run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.asset_name }}
-          tar -czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} ./${{ matrix.binary }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} ./${{ matrix.asset_name }}
+          tar -czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.binary }} ${{ matrix.asset_name }}
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2

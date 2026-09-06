@@ -43,11 +43,21 @@ and the moment it sees an error — it sends the resume signal automatically.
 
 ---
 
-## Install
+## ⚡ Quickstart
 
-### Download binary
+Install with a single command:
 
-Grab the latest release for your platform:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Praveensenpai/agy-retry/main/install.sh | bash
+```
+
+> [!TIP]
+> **Zero build dependencies required:** The script automatically detects your CPU architecture (`x86_64` or `aarch64`), pulls the pre-compiled binary from the latest GitHub Release, and installs it to `~/.local/bin/agy-retry`. If no pre-compiled binary matches, it seamlessly falls back to building from source.
+
+<details>
+<summary><b>Manual Installation</b></summary>
+
+### Pre-compiled binaries
 
 ```bash
 # Linux x86_64
@@ -67,6 +77,8 @@ cd agy-retry
 cargo build --release
 cp target/release/agy-retry ~/.local/bin/
 ```
+
+</details>
 
 ---
 
@@ -91,14 +103,13 @@ Tune the behavior with environment variables — no config file needed.
 | Variable | Default | Description |
 |---|---|---|
 | `AGY_BIN` | `~/.local/bin/agy` | Path to your `agy` binary |
-| `AGY_AUTO_MAX_RETRIES` | `3` | How many times to retry before giving up |
 | `AGY_AUTO_RETRY_DELAY` | `1.0` | Seconds to wait before retrying |
 | `AGY_AUTO_COOLDOWN` | `4.0` | Seconds to ignore output noise after retrying |
 | `AGY_AUTO_EXTRA_PATTERNS` | _(empty)_ | Extra error strings to watch for, pipe-separated |
 
 ```bash
-# retry up to 5 times with a 2s delay
-AGY_AUTO_MAX_RETRIES=5 AGY_AUTO_RETRY_DELAY=2.0 agy-retry
+# wait 2s before retrying
+AGY_AUTO_RETRY_DELAY=2.0 agy-retry
 
 # watch for additional error messages
 AGY_AUTO_EXTRA_PATTERNS="rate limit exceeded|quota reached" agy-retry
